@@ -2,3 +2,5 @@ D:\popekim_source\source\02_ColorShader\Debug\BasicFramework.exe
 D:\popekim_source\source\02_ColorShader\Debug\BasicFramework.pdb
 D:\popekim_source\source\MyProject\Debug\BasicFramework.exe
 D:\popekim_source\source\MyProject\Debug\BasicFramework.pdb
+D:\Shader\source\MyProject\Debug\BasicFramework.exe
+D:\Shader\source\MyProject\Debug\BasicFramework.pdb
