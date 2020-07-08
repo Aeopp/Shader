@@ -1,0 +1,2 @@
+D:\popekim_source\source\02_ColorShader\Debug\BasicFramework.exe
+D:\popekim_source\source\02_ColorShader\Debug\BasicFramework.pdb

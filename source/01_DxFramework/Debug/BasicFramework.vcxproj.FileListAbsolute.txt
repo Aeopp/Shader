@@ -1,0 +1,2 @@
+D:\popekim_source\source\01_DxFramework\Debug\BasicFramework.exe
+D:\popekim_source\source\01_DxFramework\Debug\BasicFramework.pdb
