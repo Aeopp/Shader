@@ -1,0 +1,2 @@
+D:\Shader\source\05_DiffuseSpecularMapping\Debug\BasicFramework.exe
+D:\Shader\source\05_DiffuseSpecularMapping\Debug\BasicFramework.pdb

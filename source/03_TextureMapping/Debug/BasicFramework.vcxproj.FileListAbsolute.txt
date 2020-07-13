@@ -1,0 +1,2 @@
+D:\Shader\source\03_TextureMapping\Debug\BasicFramework.exe
+D:\Shader\source\03_TextureMapping\Debug\BasicFramework.pdb

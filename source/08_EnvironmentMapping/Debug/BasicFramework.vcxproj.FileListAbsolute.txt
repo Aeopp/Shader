@@ -1,0 +1,2 @@
+D:\Shader\source\08_EnvironmentMapping\Debug\BasicFramework.exe
+D:\Shader\source\08_EnvironmentMapping\Debug\BasicFramework.pdb

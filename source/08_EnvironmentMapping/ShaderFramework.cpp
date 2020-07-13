@@ -24,6 +24,9 @@
 // 전역변수
 //----------------------------------------------------------------------
 
+// 포스트프로세스 셰이더의 색인
+int gPostProcessIndex = 0;
+
 // D3D 관련
 LPDIRECT3D9             gpD3D			= NULL;				// D3D
 LPDIRECT3DDEVICE9       gpD3DDevice		= NULL;				// D3D 장치
@@ -57,6 +60,21 @@ D3DXVECTOR4				gLightColor(0.7f, 0.7f, 1.0f, 1.0f);
 
 // 카메라 위치
 D3DXVECTOR4				gWorldCameraPosition( 0.0f, 0.0f, -200.0f, 1.0f ); 
+
+
+// 화면을 가득 채우는 사각형
+LPDIRECT3DVERTEXDECLARATION9 gpFullscreenQuadDec1 = NULL;
+LPDIRECT3DVERTEXBUFFER9 gpFullscreenQuadVB = NULL;
+LPDIRECT3DINDEXBUFFER9 gpFullscreenQuadIB = NULL;
+
+LPD3DXEFFECT gpNoEffect = NULL;
+LPD3DXEFFECT gpGrayScale = NULL;
+LPD3DXEFFECT gpSepia = NULL;
+
+// 장면 렌더타깃
+LPDIRECT3DTEXTURE9 gpSceneRenderTarget = NULL;
+
+
 
 //-----------------------------------------------------------------------
 // 프로그램 진입점/메시지 루프
@@ -141,6 +159,11 @@ void ProcessInput( HWND hWnd, WPARAM keyPress)
 	case VK_ESCAPE:
 		PostMessage(hWnd, WM_DESTROY, 0L, 0L);
 		break;
+	case '1':
+	case '2':
+	case '3':
+		gPostProcessIndex = keyPress - '0' - 1;
+		break;
 	}
 }
 
@@ -182,6 +205,24 @@ void RenderFrame()
 // 3D 물체등을 그린다.
 void RenderScene()
 {
+	//////////////////////
+	// 1. 장면을 렌더타깃 안에 그린다
+	//////////////////////////
+	// 현재 하드웨어 백버퍼 
+	LPDIRECT3DSURFACE9 pHWBackBuffer = NULL;
+	gpD3DDevice->GetRenderTarget(0, &pHWBackBuffer);
+
+	// 렌더타깃 위에 그린다.
+	LPDIRECT3DSURFACE9 pSceneSurface = NULL;
+	if (SUCCEEDED(gpSceneRenderTarget->GetSurfaceLevel(0, &pSceneSurface))) {
+		gpD3DDevice->SetRenderTarget(0, pSceneSurface);
+		pSceneSurface->Release();
+		pSceneSurface = NULL;
+	}
+
+	// 이전 프레임에 그렸던 장면을 지운다
+	gpD3DDevice->Clear(0, NULL, D3DCLEAR_TARGET, 0xFF000000, 1.0f, 0);
+
 	// 뷰 행렬을 만든다.
 	D3DXMATRIXA16 matView;
 	D3DXVECTOR3 vEyePt( gWorldCameraPosition.x, gWorldCameraPosition.y, gWorldCameraPosition.z ); 
@@ -238,6 +279,43 @@ void RenderScene()
 		}
 	}
 	gpEnvironmentMappingShader->End();
+
+	///////////////////////
+	// 2. 포스트프로세싱을 적용한다.
+	/////////////////////////
+	// 하드웨어 백버퍼를 사용
+	gpD3DDevice->SetRenderTarget(0, pHWBackBuffer);
+	pHWBackBuffer->Release();
+	pHWBackBuffer = NULL;
+
+	LPD3DXEFFECT effectToUse = gpNoEffect;
+
+	if (gPostProcessIndex == 1) {
+		effectToUse = gpGrayScale;
+	}
+	else if (gPostProcessIndex == 2) {
+		effectToUse = gpSepia;
+	}
+
+	effectToUse->SetTexture("SceneTexture_Tex", gpSceneRenderTarget);
+	effectToUse->Begin(&numPasses, NULL);
+	{
+		for (UINT i = 0; i < numPasses; ++i) {
+
+			effectToUse->BeginPass(i);
+			{
+				gpD3DDevice->SetStreamSource(0, gpFullscreenQuadVB, 0,
+					sizeof(float) * 5);
+				gpD3DDevice->SetIndices(gpFullscreenQuadIB);
+				gpD3DDevice->SetVertexDeclaration(gpFullscreenQuadDec1);
+
+				gpD3DDevice->DrawIndexedPrimitive(D3DPT_TRIANGLELIST,
+					0, 0, 6, 0, 2);
+			}
+			effectToUse->EndPass();
+		}
+	}
+	effectToUse->End();
 }
 
 // 디버그 정보 등을 출력.
@@ -254,7 +332,78 @@ void RenderInfo()
 	rct.bottom = WIN_HEIGHT / 3;
 	 
 	// 키 입력 정보를 출력
-	gpFont->DrawText(NULL, "데모 프레임워크\n\nESC: 데모종료", -1, &rct, 0, fontColor );
+	gpFont->DrawText(NULL, "데모 프레임워크\n\nESC: 데모종료\n1: 칼라\n2: 흑백\n3: 세피아", -1, &rct, 0, fontColor );
+}
+
+void InitFullScreenQuad()
+{
+	D3DVERTEXELEMENT9 vtxDesc[3];
+	 
+	int offset = 0;
+	int i = 0;
+	vtxDesc[i].Stream = 0;
+	vtxDesc[i].Offset = offset;
+	vtxDesc[i].Type = D3DDECLTYPE_FLOAT3;
+	vtxDesc[i].Method = D3DDECLMETHOD_DEFAULT;
+	vtxDesc[i].Usage = D3DDECLUSAGE_POSITION;
+	vtxDesc[i].UsageIndex = 0;
+
+	offset += sizeof(float) * 3;
+	++i;
+
+	vtxDesc[i].Stream = 0;
+	vtxDesc[i].Offset = offset;
+	vtxDesc[i].Type = D3DDECLTYPE_FLOAT2;
+	vtxDesc[i].Method = D3DDECLMETHOD_DEFAULT;
+	vtxDesc[i].Usage = D3DDECLUSAGE_TEXCOORD;
+	vtxDesc[i].UsageIndex = 0;
+
+	offset += sizeof(float) * 2;
+	++i;
+
+	vtxDesc[i].Stream = 0xFF;
+	vtxDesc[i].Offset = 0;
+	vtxDesc[i].Type = D3DDECLTYPE_UNUSED;
+	vtxDesc[i].Method = 0;
+	vtxDesc[i].Usage = 0;
+	vtxDesc[i].UsageIndex = 0;
+
+	gpD3DDevice->CreateVertexDeclaration(vtxDesc, &gpFullscreenQuadDec1);
+
+	gpD3DDevice->CreateVertexBuffer(offset * 4, 0, 0, D3DPOOL_MANAGED,
+		&gpFullscreenQuadVB, NULL);
+
+	void* vertexData = NULL;
+	gpFullscreenQuadVB->Lock(0, 0, &vertexData, 0);
+
+	{
+		float* data = (float*)vertexData;
+		*data++ = -1.0f; *data++ = 1.0f; *data++ = 0.0f;
+		*data++ = 0.0f; *data++ = 0.0f;
+
+		*data++ = 1.0f; *data++ = 1.0f; *data++ = 0.0f;
+		*data++ = 1.f; *data++ = 0;
+
+		*data++ = 1.0f; *data++ = - 1.0f; *data++ = 0.0f;
+		*data++ = 1.f; *data++ = 1.0f;
+
+		*data++ = -1.0f; *data++ = -1.0f; *data++ = 0.0f;
+		*data++ = 0.0f ; *data++ = 1.0f;
+	}
+
+	gpFullscreenQuadVB->Unlock();
+
+	gpD3DDevice->CreateIndexBuffer(sizeof(short) * 6, 0, D3DFMT_INDEX16,
+		D3DPOOL_MANAGED, &gpFullscreenQuadIB, NULL);
+
+	void* indexData = NULL;
+	gpFullscreenQuadIB->Lock(0, 0, &indexData, 0);
+	{
+		unsigned short* data = (unsigned short*)indexData;
+		*data++ = 0; *data++ = 1; *data++ = 3;
+		*data++ = 3; *data++ = 1; *data++ = 2;
+	}
+	gpFullscreenQuadIB->Unlock();
 }
 
 //------------------------------------------------------------
@@ -268,6 +417,16 @@ bool InitEverything(HWND hWnd)
 		return false;
 	}
 	
+	// 화면을 가득 채우는 사각형을 하나 만든다.
+	InitFullScreenQuad();
+
+	if (FAILED(gpD3DDevice->CreateTexture(WIN_WIDTH, WIN_HEIGHT,
+		1, D3DUSAGE_RENDERTARGET, D3DFMT_X8R8G8B8,
+		D3DPOOL_DEFAULT, &gpSceneRenderTarget, NULL))) {
+
+		return false;
+	}
+
 	// 모델, 쉐이더, 텍스처등을 로딩
 	if( !LoadAssets() )
 	{
@@ -366,6 +525,20 @@ bool LoadAssets()
 		return false;
 	}
 
+	gpNoEffect = LoadShader("NoEffect.fx");
+	if (!gpNoEffect) {
+		return false; 
+	}
+
+	gpGrayScale= LoadShader("Grayscale.fx");
+	if (!gpGrayScale) {
+		return false;
+	}
+
+	gpSepia = LoadShader("Sepia.fx");
+	if (!gpSepia) {
+		return false;
+	}
 	return true;
 }
 
@@ -481,7 +654,20 @@ void Cleanup()
 		gpSnowENV->Release();
 		gpSnowENV = NULL;
 	}
-	
+	// 화면크기 사각형을 해제한다.
+	if (gpFullscreenQuadDec1) {
+		gpFullscreenQuadDec1->Release();
+		gpFullscreenQuadDec1 = NULL;
+	}
+	if (gpFullscreenQuadIB) {
+		gpFullscreenQuadIB->Release();
+		gpFullscreenQuadIB = NULL;
+	}
+	if (gpFullscreenQuadVB) {
+		gpFullscreenQuadVB->Release();
+		gpFullscreenQuadVB = NULL;
+	}
+
 	// D3D를 release 한다.
     if(gpD3DDevice)
 	{
@@ -493,6 +679,24 @@ void Cleanup()
 	{
         gpD3D->Release();
 		gpD3D = NULL;
+	}
+
+	if (gpNoEffect) {
+		gpNoEffect->Release();
+		gpNoEffect = NULL;
+	}
+
+	if (gpGrayScale) {
+		gpGrayScale->Release();
+		gpGrayScale = NULL;
+	}
+	if (gpSepia) {
+		gpSepia->Release();
+		gpSepia = NULL;
+	}
+	if (gpSceneRenderTarget) {
+		gpSceneRenderTarget->Release();
+		gpSceneRenderTarget = NULL;
 	}
 }
 
