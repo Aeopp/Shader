@@ -1,0 +1,2 @@
+D:\Shader\source\10_ShadowMapping\Debug\BasicFramework.exe
+D:\Shader\source\10_ShadowMapping\Debug\BasicFramework.pdb

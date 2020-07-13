@@ -1,0 +1,2 @@
+D:\Shader\source\12_EdgeDetection\Debug\BasicFramework.exe
+D:\Shader\source\12_EdgeDetection\Debug\BasicFramework.pdb

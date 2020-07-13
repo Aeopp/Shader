@@ -32,10 +32,14 @@ LPDIRECT3DDEVICE9       gpD3DDevice		= NULL;				// D3D 장치
 ID3DXFont*              gpFont			= NULL;
 
 // 모델
-LPD3DXMESH				gpSphere		= NULL;
-
+LPD3DXMESH				gpTorus		= NULL;
+LPD3DXEFFECT            gpCreateShadowShader = NULL;
 // 쉐이더
-LPD3DXEFFECT			gpLightingShader	= NULL;
+LPD3DXEFFECT			gpApplyShadowShader	= NULL;
+LPD3DXMESH              gpDisc = NULL;
+
+D3DXVECTOR4 gTorusColor(1, 1, 0, 1);
+D3DXVECTOR4 gDiscColor(0, 1, 1, 1);
 
 // 텍스처
 
@@ -50,6 +54,8 @@ D3DXVECTOR4				gWorldLightPosition(500.0f, 500.0f, -500.0f, 1.0f);
 
 // 카메라 위치
 D3DXVECTOR4				gWorldCameraPosition( 0.0f, 0.0f, -200.0f, 1.0f ); 
+LPDIRECT3DTEXTURE9		gpShadowRenderTarget = NULL;
+LPDIRECT3DSURFACE9		gpShadowDepthStencil = NULL;
 
 //-----------------------------------------------------------------------
 // 프로그램 진입점/메시지 루프
@@ -175,51 +181,142 @@ void RenderFrame()
 // 3D 물체등을 그린다.
 void RenderScene()
 {
-	// 뷰 행렬을 만든다.
-	D3DXMATRIXA16 matView;
-	D3DXVECTOR3 vEyePt( gWorldCameraPosition.x, gWorldCameraPosition.y, gWorldCameraPosition.z ); 
-	D3DXVECTOR3 vLookatPt( 0.0f, 0.0f,  0.0f );
-	D3DXVECTOR3 vUpVec(    0.0f, 1.0f,  0.0f );
- 	D3DXMatrixLookAtLH( &matView, &vEyePt, &vLookatPt, &vUpVec );
-	
-	// 투영행렬을 만든다.
-	D3DXMATRIXA16			matProjection;
-	D3DXMatrixPerspectiveFovLH( &matProjection, FOV, ASPECT_RATIO, NEAR_PLANE, FAR_PLANE );
+	D3DXMATRIXA16 matLightView;
 
-	// 프레임마다 0.4도씩 회전을 시킨다.
-	gRotationY += 0.4f * PI / 180.0f;
-	if ( gRotationY > 2 * PI )
 	{
-		gRotationY -= 2 * PI;
+		D3DXVECTOR3 vEyePt(gWorldLightPosition.x, gWorldLightPosition.y, gWorldLightPosition.z);
+		D3DXVECTOR3 vLookatPt(0.0f, 0.0f, 0.0f);
+		D3DXVECTOR3 vUpVec(0.0f, 1.0f, 0.0f);
+
+		D3DXMatrixLookAtLH(&matLightView, &vEyePt, &vLookatPt, &vUpVec);
+	}
+	D3DXMATRIXA16 matLightProjection;
+	{
+		D3DXMatrixPerspectiveFovLH(&matLightProjection, D3DX_PI / 4.0f, 1, 1, 1000);
 	}
 
-	// 월드행렬을 만든다.
-	D3DXMATRIXA16			matWorld;
-	D3DXMatrixRotationY(&matWorld, gRotationY);
-
-	// 쉐이더 전역변수들을 설정
-	gpLightingShader->SetMatrix("gWorldMatrix", &matWorld);
-	gpLightingShader->SetMatrix("gViewMatrix",  &matView);
-	gpLightingShader->SetMatrix("gProjectionMatrix",  &matProjection);
-
-	gpLightingShader->SetVector("gWorldLightPosition", &gWorldLightPosition);
-	gpLightingShader->SetVector("gWorldCameraPosition", &gWorldCameraPosition);
-
-	// 쉐이더를 시작한다.
-	UINT numPasses = 0;
-	gpLightingShader->Begin(&numPasses, NULL);
+	D3DXMATRIXA16 matViewProjection;
 	{
-		for (UINT i = 0; i < numPasses; ++i )
+		D3DXMATRIXA16 matView;
+		D3DXVECTOR3 vEyePt(gWorldCameraPosition.x, gWorldCameraPosition.y,
+			gWorldCameraPosition.z);
+
+		D3DXVECTOR3 vLookatPt(0.0f, 0.0f, 0.0f);
+		D3DXVECTOR3 vUpVec(0.0f, 1.0f, 0.0f);
+		D3DXMatrixLookAtLH(&matView, &vEyePt, &vLookatPt, &vUpVec);
+
+		D3DXMATRIXA16 matProjection;
+		D3DXMatrixPerspectiveFovLH(&matProjection, FOV, ASPECT_RATIO, NEAR_PLANE, FAR_PLANE);
+		
+		D3DXMatrixMultiply(&matViewProjection, &matView, &matProjection);
+	}
+
+	D3DXMATRIXA16 matTorusWorld;
+	{
+		gRotationY += 0.4f * PI / 180.0f;
+		if (gRotationY > 2 * PI)
 		{
-			gpLightingShader->BeginPass(i);
+			gRotationY -= 2 * PI;
+		}
+		D3DXMatrixRotationY(&matTorusWorld, gRotationY);
+	}
+
+	D3DXMATRIXA16 matDiscWorld;
+	{
+		D3DXMATRIXA16 matScale;
+		D3DXMatrixScaling(&matScale, 2, 2, 2);
+
+		D3DXMATRIXA16 matTrans;
+		D3DXMatrixTranslation(&matTrans, 0, -40, 0);
+
+		D3DXMatrixMultiply(&matDiscWorld, &matScale, &matTrans);
+	}
+
+	LPDIRECT3DSURFACE9 pHWBackBuffer = NULL;
+	LPDIRECT3DSURFACE9 pHWDepthStencilBuffer = NULL;
+	gpD3DDevice->GetRenderTarget(0, &pHWBackBuffer);
+	gpD3DDevice->GetDepthStencilSurface(&pHWDepthStencilBuffer);
+
+	/////////////////////////////
+	// 1. 그림자 만들기
+	/////////////////////////////
+
+	// 그림자맵의 렌더타깃과 깊이 버퍼를 사용한다.
+	LPDIRECT3DSURFACE9 pShadowSurface = NULL;
+	if (SUCCEEDED(gpShadowRenderTarget->GetSurfaceLevel(0,
+		&pShadowSurface))) 
+	{
+		gpD3DDevice->SetRenderTarget(0, pShadowSurface);
+		pShadowSurface->Release();
+		pShadowSurface = NULL;
+	}
+	gpD3DDevice->SetDepthStencilSurface(gpShadowDepthStencil);
+
+	gpD3DDevice->Clear(0, NULL, (D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER),
+		0xFFFFFFFF, 1.0f, 0);
+
+	gpCreateShadowShader->SetMatrix("gWorldMatrix", &matTorusWorld);
+	gpCreateShadowShader->SetMatrix("gLightViewMatrix", &matLightView);
+	gpCreateShadowShader->SetMatrix("gLightProjectionMatrix",	&matLightProjection);
+
+	// 그림자 만들기 셰이더를 시작
+	{
+		UINT numPasses = 0;
+		gpCreateShadowShader->Begin(&numPasses, NULL);
+		{
+			for (UINT i = 0; i < numPasses; ++i) 
 			{
-				// 구체를 그린다.
-				gpSphere->DrawSubset(0);
+				gpCreateShadowShader->BeginPass(i);
+				gpTorus->DrawSubset(0);
 			}
-			gpLightingShader->EndPass();
+			gpCreateShadowShader->EndPass();
 		}
 	}
-	gpLightingShader->End();
+	gpCreateShadowShader->End();
+
+	////////////////////////////////
+	// 2. 그림자 입히기
+	////////////////////////////////
+
+	// 하드웨어 백버퍼/깊이 버퍼를 사용한다.
+	gpD3DDevice->SetRenderTarget(0, pHWBackBuffer);
+	gpD3DDevice->SetDepthStencilSurface(pHWDepthStencilBuffer);
+
+	pHWBackBuffer->Release();
+	pHWBackBuffer = NULL;
+	pHWDepthStencilBuffer->Release();
+	pHWDepthStencilBuffer = NULL;
+
+	// 그림자 입히기 셰이더 전역변수들을 설정
+	gpApplyShadowShader->SetMatrix("gWorldMatrix", &matTorusWorld);
+	gpApplyShadowShader->SetMatrix("gViewProjection", &matViewProjection);
+	
+	gpApplyShadowShader->SetMatrix("gLightViewMatrix", &matLightView);
+	gpApplyShadowShader->SetMatrix("gLightProjectionMatrix", &matLightProjection);
+
+	gpApplyShadowShader->SetVector("gWorldLightPosition", &gWorldLightPosition);
+
+	gpApplyShadowShader->SetVector("gObjectColor", &gTorusColor);
+
+	gpApplyShadowShader->SetTexture("ShadowMap_Tex", gpShadowRenderTarget);
+
+	UINT numPasses = 0;
+	gpApplyShadowShader->Begin(&numPasses, NULL);
+	{
+		for (UINT i = 0; i < numPasses; ++i) 
+		{
+			gpApplyShadowShader->BeginPass(i);
+			{
+				gpTorus->DrawSubset(0);
+				gpApplyShadowShader->SetMatrix("gWorldMatrix", &matDiscWorld);
+				gpApplyShadowShader->SetVector("gObjectColor", &gDiscColor);
+				gpApplyShadowShader->CommitChanges();
+				gpDisc->DrawSubset(0);
+			}
+			gpApplyShadowShader->EndPass();
+		}
+	}
+	gpApplyShadowShader->End();
 }
 
 // 디버그 정보 등을 출력.
@@ -246,6 +343,23 @@ bool InitEverything(HWND hWnd)
 {
 	// D3D를 초기화
 	if( !InitD3D(hWnd) )
+	{
+		return false;
+	}
+
+	const int shadowMapSize = 2048;
+
+	if (FAILED(gpD3DDevice->CreateTexture(shadowMapSize, shadowMapSize,
+		1, D3DUSAGE_RENDERTARGET, D3DFMT_R32F,
+		D3DPOOL_DEFAULT, &gpShadowRenderTarget, NULL))) 
+	{
+		return false;
+	}
+
+	// 그림자맵과 동일한 크기의 깊이버퍼도 만들어줘야 한다.
+	if (FAILED(gpD3DDevice->CreateDepthStencilSurface(shadowMapSize,
+		shadowMapSize,D3DFMT_D24X8,D3DMULTISAMPLE_NONE,0,TRUE,
+		&gpShadowDepthStencil,NULL))) 
 	{
 		return false;
 	}
@@ -312,15 +426,25 @@ bool LoadAssets()
 	// 텍스처 로딩
 
 	// 쉐이더 로딩
-	gpLightingShader = LoadShader("Lighting.fx");
-	if ( !gpLightingShader )
+	gpApplyShadowShader = LoadShader("ApplyShadow.fx");
+	if ( !gpApplyShadowShader )
 	{
 		return false;
 	}
 
+	gpCreateShadowShader = LoadShader("CreateShadow.fx");
+	if (!gpCreateShadowShader) {
+		return false; 
+	}
+
+	gpDisc = LoadModel("disc.x");
+	if (!gpDisc) {
+		return false;  
+	}
+
 	// 모델 로딩
-	gpSphere = LoadModel("sphere.x");
-	if ( !gpSphere )
+	gpTorus = LoadModel("torus.x");
+	if ( !gpTorus )
 	{
 		return false;
 	}
@@ -403,17 +527,17 @@ void Cleanup()
 	}
 
 	// 모델을 release 한다.
-	if ( gpSphere )
+	if ( gpTorus )
 	{
-		gpSphere->Release();
-		gpSphere = NULL;
+		gpTorus->Release();
+		gpTorus = NULL;
 	}
 
 	// 쉐이더를 release 한다.
-	if ( gpLightingShader )
+	if ( gpApplyShadowShader )
 	{
-		gpLightingShader->Release();
-		gpLightingShader = NULL;
+		gpApplyShadowShader->Release();
+		gpApplyShadowShader = NULL;
 	}
 
 	// 텍스처를 release 한다.
@@ -429,6 +553,27 @@ void Cleanup()
 	{
         gpD3D->Release();
 		gpD3D = NULL;
+	}
+
+	if (gpCreateShadowShader) {
+		gpCreateShadowShader->Release();
+		gpCreateShadowShader = NULL;
+	}
+
+	if (gpDisc) {
+		gpDisc->Release();
+		gpDisc = NULL;
+	}
+
+	
+	if (gpShadowRenderTarget) {
+		gpShadowRenderTarget->Release();
+		gpShadowRenderTarget = NULL;
+	}
+
+	if (gpShadowDepthStencil) {
+		gpShadowDepthStencil->Release();
+		gpShadowDepthStencil = NULL; 
 	}
 }
 

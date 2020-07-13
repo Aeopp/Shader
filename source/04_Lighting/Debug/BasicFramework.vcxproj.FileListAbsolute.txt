@@ -1,0 +1,2 @@
+D:\Shader\source\04_Lighting\Debug\BasicFramework.exe
+D:\Shader\source\04_Lighting\Debug\BasicFramework.pdb

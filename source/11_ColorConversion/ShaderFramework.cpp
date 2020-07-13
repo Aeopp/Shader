@@ -69,6 +69,10 @@ LPDIRECT3DINDEXBUFFER9			gpFullscreenQuadIB = NULL;
 // 장면 렌더타깃
 LPDIRECT3DTEXTURE9		gpSceneRenderTarget = NULL;
 
+LPD3DXEFFECT gpEdgeDetection = NULL;
+LPD3DXEFFECT gpEmboss = NULL;
+
+
 // 사용할 포스트프로세스 쉐이더의 색인
 int gPostProcessIndex	= 0;
 
@@ -158,6 +162,8 @@ void ProcessInput( HWND hWnd, WPARAM keyPress)
 	case '1':
 	case '2':
 	case '3':
+	case '4':
+	case '5':
 		gPostProcessIndex = keyPress - '0' - 1;
 		break;
 	}
@@ -296,7 +302,23 @@ void RenderScene()
 	{
 		effectToUse = gpSepia;
 	}
+	else if (gPostProcessIndex == 3)
+	{
+		
+		effectToUse = gpEdgeDetection;
+	}
+	else if (gPostProcessIndex == 4)
+	{
+		
+		effectToUse = gpEmboss;
+	}
 
+	if (effectToUse == gpEdgeDetection || effectToUse == gpEmboss)
+	{
+		D3DXVECTOR4 pixelOffset(1 / (float)WIN_WIDTH, 1 / (float)WIN_HEIGHT, 0, 0);
+		effectToUse->SetVector("gPixelOffset", &pixelOffset);
+	}
+	
 	effectToUse->SetTexture("SceneTexture_Tex", gpSceneRenderTarget);
 	effectToUse->Begin(&numPasses, NULL);
 	{
@@ -331,7 +353,7 @@ void RenderInfo()
 	rct.bottom = WIN_HEIGHT / 3;
 	 
 	// 키 입력 정보를 출력
-	gpFont->DrawText(NULL, "데모 프레임워크\n\nESC: 데모종료\n1: 칼라\n2: 흑백\n3: 세피아", -1, &rct, 0, fontColor );
+	gpFont->DrawText(NULL, "데모 프레임워크\n\nESC: 데모종료\n1: 칼라\n2: 흑백\n3: 세피아\n4: 외곽선찾기\n5 양각효과", -1, &rct, 0, fontColor );
 }
 
 //------------------------------------------------------------
@@ -472,6 +494,16 @@ bool LoadAssets()
 		return false;
 	}
 
+	gpEdgeDetection = LoadShader("EdgeDetection.fx");
+	if (!gpEdgeDetection) {
+		return false;
+	}
+
+	gpEmboss = LoadShader("Emboss.fx");
+	if (gpEmboss) {
+		return false; 
+	}
+
 	return true;
 }
 
@@ -604,6 +636,18 @@ void Cleanup()
 	{
 		gpSnowENV->Release();
 		gpSnowENV = NULL;
+	}
+
+	if (gpEdgeDetection)
+	{
+		gpEdgeDetection->Release();
+		gpEdgeDetection = NULL;
+	}
+
+	if (gpEmboss)
+	{
+		gpEmboss->Release();
+		gpEmboss = NULL;
 	}
 
 	// 화면크기 사각형을 해제한다
